@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import json
 
 from openai import OpenAI
 
@@ -46,10 +47,22 @@ def main():
         raise RuntimeError("no choices in response")
 
     # You can use print statements as follows for debugging, they'll be visible when running tests.
-    print("Logs from your program will appear here!", file=sys.stderr)
+    print("Logs from your program will appear here!", file=sys.stderr, end="")
 
     # TODO: Uncomment the following line to pass the first stage
-    print(chat.choices[0].message.content)
+    msg = chat.choices[0].message.content
+    if msg is not None:
+        print(msg, end="")
+
+    # Tool Execution
+    tool_calls = chat.choices[0].message.tool_calls
+    if tool_calls is not None:
+        for tool_call in tool_calls:
+            if tool_call.function.name == "Read":
+                args = json.loads(tool_call.function.arguments)
+                file_path = args["file_path"]
+                with open(file_path, "r") as f:
+                    print(f.read(), end="")
 
 
 if __name__ == "__main__":
