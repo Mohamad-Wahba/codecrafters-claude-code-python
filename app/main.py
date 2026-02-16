@@ -2,8 +2,11 @@ import argparse
 import os
 import sys
 import json
+from tracemalloc import stop
 
 from openai import OpenAI
+from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 API_KEY = os.getenv("OPENROUTER_API_KEY")
 BASE_URL = os.getenv("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
@@ -19,50 +22,68 @@ def main():
 
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
-    chat = client.chat.completions.create(
-        model="anthropic/claude-haiku-4.5",
-        messages=[{"role": "user", "content": args.p}],
-        tools=[
-            {
-                "type": "function",
-                "function": {
-                    "name": "Read",
-                    "description": "Read and return the contents of a file",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": {
-                                "type": "string",
-                                "description": "The path to the file to read",
-                            }
+    messages = [{"role": "user", "content": args.p}]
+
+    while True:
+        chat: ChatCompletion = client.chat.completions.create(
+            model="anthropic/claude-haiku-4.5",
+            messages=messages,
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "Read",
+                        "description": "Read and return the contents of a file",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": {
+                                    "type": "string",
+                                    "description": "The path to the file to read",
+                                }
+                            },
+                            "required": ["file_path"],
                         },
-                        "required": ["file_path"],
                     },
-                },
+                }
+            ],
+        )
+
+        if not chat.choices or len(chat.choices) == 0:
+            raise RuntimeError("no choices in response")
+
+        msg: ChatCompletionMessage = chat.choices[0].message
+
+        messages.append(
+            {
+                "role": msg.role,
+                "content": msg.content,
+                "tool_calls": [tc.to_dict() for tc in msg.tool_calls]
+                if msg.tool_calls
+                else None,
             }
-        ],
-    )
+        )
 
-    if not chat.choices or len(chat.choices) == 0:
-        raise RuntimeError("no choices in response")
+        # Tool Execution
+        if msg.tool_calls:
+            for tool_call in msg.tool_calls:
+                if tool_call.function.name == "Read":
+                    args = json.loads(tool_call.function.arguments)
+                    file_path = args["file_path"]
+                    with open(file_path, "r") as f:
+                        Read_response = f.read()
 
-    # You can use print statements as follows for debugging, they'll be visible when running tests.
-    print("Logs from your program will appear here!", file=sys.stderr, end="")
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": Read_response,
+                    }
+                )
 
-    # TODO: Uncomment the following line to pass the first stage
-    msg = chat.choices[0].message.content
-    if msg is not None:
-        print(msg, end="")
-
-    # Tool Execution
-    tool_calls = chat.choices[0].message.tool_calls
-    if tool_calls is not None:
-        for tool_call in tool_calls:
-            if tool_call.function.name == "Read":
-                args = json.loads(tool_call.function.arguments)
-                file_path = args["file_path"]
-                with open(file_path, "r") as f:
-                    print(f.read(), end="")
+        if chat.choices[0].finish_reason == "stop":
+            print(msg.content, end="")
+            break
 
 
 if __name__ == "__main__":
