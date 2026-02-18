@@ -1,6 +1,8 @@
 import argparse
 import os
 import json
+import subprocess
+import shlex
 
 from openai import OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
@@ -65,6 +67,23 @@ def main():
                         },
                     },
                 },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "Bash",
+                        "description": "Execute a shell command",
+                        "parameters": {
+                            "type": "object",
+                            "required": ["command"],
+                            "properties": {
+                                "command": {
+                                    "type": "string",
+                                    "description": "The command to execute",
+                                }
+                            },
+                        },
+                    },
+                },
             ],
         )
 
@@ -91,14 +110,31 @@ def main():
                     file_path = args["file_path"]
                     with open(file_path, "r") as f:
                         content = f.read()
-                
+
                 if tool_call.function.name == "Write":
                     args = json.loads(tool_call.function.arguments)
                     file_path = args["file_path"]
                     content = args["content"]
                     with open(file_path, "w") as f:
                         f.write(content)
-                    
+
+                if tool_call.function.name == "Bash":
+                    args = json.loads(tool_call.function.arguments)
+                    command = args["command"]
+
+                    #! test
+                    # print(f"-- args: {args} \n-- command:{command}")
+
+                    command_run = subprocess.run(
+                        args=shlex.split(command), capture_output=True, text=True
+                    )
+                    if not command_run.returncode:
+                        content = command_run.stdout
+                    else:
+                        content = command_run.stderr
+
+                #! test
+                # print(f"-- content: {content}")
 
                 messages.append(
                     {
